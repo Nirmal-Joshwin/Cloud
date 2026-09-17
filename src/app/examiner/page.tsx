@@ -8,6 +8,9 @@ import { uploadEncryptedToIPFS, IPFSUploadResult } from "@/lib/ipfs";
 import {
   connectWallet,
   getExamVaultContract,
+  getContractAddress,
+  setCustomContractAddress,
+  deployExamVaultFromBrowser,
   hasInjectedWallet,
   HARDHAT_TEST_ACCOUNTS,
 } from "@/lib/contract";
@@ -25,7 +28,9 @@ import {
   Trash2,
   ExternalLink,
   Info,
-  User,
+  Rocket,
+  Settings,
+  AlertTriangle,
 } from "lucide-react";
 
 export default function ExaminerPage() {
@@ -39,6 +44,12 @@ export default function ExaminerPage() {
   const [isDemoMode, setIsDemoMode] = useState(false);
   const [hasMetaMask, setHasMetaMask] = useState(true);
 
+  // Contract Address & Deployment State
+  const [contractAddress, setContractAddress] = useState<string>("");
+  const [customContractInput, setCustomContractInput] = useState<string>("");
+  const [isDeployingContract, setIsDeployingContract] = useState(false);
+  const [deployedNotice, setDeployedNotice] = useState<string | null>(null);
+
   // Status & Progress State
   const [statusStep, setStatusStep] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -51,6 +62,7 @@ export default function ExaminerPage() {
     ipfsProvider: string;
   } | null>(null);
   const [copiedKey, setCopiedKey] = useState(false);
+  const [copiedAddress, setCopiedAddress] = useState(false);
 
   // Initialize
   useEffect(() => {
@@ -67,16 +79,23 @@ export default function ExaminerPage() {
     const hasInjected = hasInjectedWallet();
     setHasMetaMask(hasInjected);
 
-    // Check currently connected or demo account
+    const activeAddr = getContractAddress();
+    setContractAddress(activeAddr);
+    setCustomContractInput(activeAddr);
+
     connectWallet()
       .then((w) => {
         setWalletAccount(w.address);
         setIsDemoMode(w.isDemoWallet);
       })
-      .catch(() => {
-        // Hardhat node might not be started yet; will be reported on submission
-      });
+      .catch(() => {});
   }, []);
+
+  // Check if contract address is incorrectly set to the user's personal wallet
+  const isAddressMisconfigured =
+    Boolean(walletAccount &&
+    contractAddress &&
+    walletAccount.toLowerCase() === contractAddress.toLowerCase());
 
   // React Dropzone configuration
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -105,6 +124,12 @@ export default function ExaminerPage() {
     navigator.clipboard.writeText(text);
     setCopiedKey(true);
     setTimeout(() => setCopiedKey(false), 2000);
+  };
+
+  const copyContractAddress = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedAddress(true);
+    setTimeout(() => setCopiedAddress(false), 2000);
   };
 
   // Center Addresses Helpers
@@ -143,6 +168,39 @@ export default function ExaminerPage() {
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to switch account");
     }
+  };
+
+  // In-Browser Contract Deployment via MetaMask
+  const handleDeployContractFromBrowser = async () => {
+    try {
+      setIsDeployingContract(true);
+      setErrorMsg(null);
+      setDeployedNotice(null);
+
+      const wallet = await connectWallet();
+      const deployedAddr = await deployExamVaultFromBrowser(wallet.signer);
+
+      setContractAddress(deployedAddr);
+      setCustomContractInput(deployedAddr);
+      setDeployedNotice(deployedAddr);
+    } catch (err: unknown) {
+      console.error(err);
+      const error = err as { reason?: string; message?: string };
+      setErrorMsg(error.reason || error.message || "Failed to deploy contract via MetaMask");
+    } finally {
+      setIsDeployingContract(false);
+    }
+  };
+
+  const handleSaveCustomContract = () => {
+    if (!ethers.isAddress(customContractInput.trim())) {
+      setErrorMsg("Invalid Ethereum contract address format.");
+      return;
+    }
+    setCustomContractAddress(customContractInput.trim());
+    setContractAddress(customContractInput.trim());
+    setErrorMsg(null);
+    alert("Contract address updated for this browser session!");
   };
 
   // Main Submit Pipeline: Encrypt -> Upload IPFS -> Deploy to Contract
@@ -196,6 +254,13 @@ export default function ExaminerPage() {
       setWalletAccount(wallet.address);
       setIsDemoMode(wallet.isDemoWallet);
 
+      const activeContract = getContractAddress();
+      if (wallet.address.toLowerCase() === activeContract.toLowerCase()) {
+        throw new Error(
+          `Contract Address (${activeContract}) is set to your personal wallet address. Smart contract calls cannot be sent to personal wallets. Please deploy the ExamVault contract first by clicking 'Deploy ExamVault to Sepolia' above.`
+        );
+      }
+
       // STEP 2: Local AES-256 Encryption
       setStatusStep(1);
       const encryptionResult = await encryptFile(selectedFile, aesKey);
@@ -211,7 +276,7 @@ export default function ExaminerPage() {
 
       // STEP 4: Call Smart Contract
       setStatusStep(3);
-      const contract = getExamVaultContract(wallet.signer);
+      const contract = getExamVaultContract(wallet.signer, activeContract);
 
       const tx = await contract.createExam(
         BigInt(examId),
@@ -250,7 +315,7 @@ export default function ExaminerPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-6">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-xs font-semibold uppercase tracking-wider mb-2">
           <Key className="w-3.5 h-3.5" /> Examiner Portal
         </div>
@@ -258,6 +323,90 @@ export default function ExaminerPage() {
         <p className="text-slate-400 text-sm mt-1">
           Perform client-side AES-256 encryption on the exam paper, distribute ciphertext via IPFS, and register the unlock time-lock in the smart contract.
         </p>
+      </div>
+
+      {/* Contract Address Configuration & 1-Click Deployer Card */}
+      <div className="mb-8 p-5 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
+            <Settings className="w-4 h-4 text-indigo-400" />
+            Smart Contract Target
+          </div>
+          <button
+            type="button"
+            onClick={handleDeployContractFromBrowser}
+            disabled={isDeployingContract}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs shadow-md shadow-indigo-600/20 transition disabled:opacity-50"
+          >
+            {isDeployingContract ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Deploying to Sepolia via MetaMask...</span>
+              </>
+            ) : (
+              <>
+                <Rocket className="w-3.5 h-3.5" />
+                <span>Deploy ExamVault Contract to Sepolia</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Misconfiguration Alert */}
+        {isAddressMisconfigured && (
+          <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-200 text-xs flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <strong className="block text-rose-300 font-semibold mb-0.5">
+                Notice: Contract address is currently set to your personal wallet address!
+              </strong>
+              In Ethereum, smart contract transactions cannot be sent to personal wallets. Click the{" "}
+              <strong className="text-white">&ldquo;Deploy ExamVault Contract to Sepolia&rdquo;</strong> button above to deploy your actual contract with your MetaMask wallet.
+            </div>
+          </div>
+        )}
+
+        {/* Successfully Deployed Notice */}
+        {deployedNotice && (
+          <div className="p-3.5 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-200 text-xs space-y-1">
+            <div className="font-bold flex items-center gap-1.5 text-emerald-400">
+              <CheckCircle2 className="w-4 h-4" />
+              Contract Successfully Deployed to Sepolia!
+            </div>
+            <div className="flex items-center gap-2 font-mono text-[11px] text-slate-200 break-all">
+              <span>{deployedNotice}</span>
+              <button
+                type="button"
+                onClick={() => copyContractAddress(deployedNotice)}
+                className="p-1 text-slate-400 hover:text-white"
+                title="Copy Address"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+              {copiedAddress && <span className="text-[10px] text-emerald-400">Copied!</span>}
+            </div>
+            <p className="text-[11px] text-slate-400 pt-0.5">
+              This address is now active for this browser. To make it permanent on Render, update your Render Environment Variable <code className="text-indigo-300">NEXT_PUBLIC_CONTRACT_ADDRESS</code> with this address.
+            </p>
+          </div>
+        )}
+
+        <div className="flex items-center gap-2 pt-1">
+          <input
+            type="text"
+            value={customContractInput}
+            onChange={(e) => setCustomContractInput(e.target.value)}
+            placeholder="Contract Address (0x...)"
+            className="flex-1 px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-indigo-500"
+          />
+          <button
+            type="button"
+            onClick={handleSaveCustomContract}
+            className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+          >
+            Apply
+          </button>
+        </div>
       </div>
 
       {/* Demo Mode / MetaMask Notice Banner */}
@@ -280,7 +429,7 @@ export default function ExaminerPage() {
               }}
               className="px-2 py-1 rounded bg-slate-900 border border-slate-700 text-white font-mono text-[11px] focus:outline-none"
             >
-              {HARDHAT_TEST_ACCOUNTS.map((acc, idx) => (
+              {HARDHAT_TEST_ACCOUNTS.map((acc) => (
                 <option key={acc.address} value={acc.address}>
                   {acc.name} ({acc.role})
                 </option>
@@ -472,7 +621,7 @@ export default function ExaminerPage() {
           {errorMsg && (
             <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-sm flex items-start gap-3">
               <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0 text-rose-400" />
-              <div>{errorMsg}</div>
+              <div className="break-all">{errorMsg}</div>
             </div>
           )}
 
