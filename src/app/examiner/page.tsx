@@ -118,9 +118,18 @@ export default function ExaminerPage() {
     maxFiles: 1,
   });
 
+  const setUnlockMinutesFromNow = (mins: number) => {
+    const date = new Date(Date.now() + mins * 60 * 1000);
+    const localIso = new Date(date.getTime() - date.getTimezoneOffset() * 60000)
+      .toISOString()
+      .slice(0, 16);
+    setUnlockDateTime(localIso);
+  };
+
   const handleRegenerateKey = () => {
     setAesKey(generateAES256Key());
   };
+
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -236,10 +245,11 @@ export default function ExaminerPage() {
 
     const unlockTimestamp = Math.floor(new Date(unlockDateTime).getTime() / 1000);
     const nowTimestamp = Math.floor(Date.now() / 1000);
-    if (unlockTimestamp <= nowTimestamp) {
-      setErrorMsg("Unlock time must be in the future.");
+    if (unlockTimestamp <= nowTimestamp + 30) {
+      setErrorMsg("Unlock time must be at least 2 minutes in the future to allow for blockchain block confirmation. Please use the '+10m' or '+30m' preset button above.");
       return;
     }
+
 
     // Filter and validate center addresses
     const cleanedCenters = centerAddresses
@@ -556,10 +566,43 @@ export default function ExaminerPage() {
 
           {/* Section 3: Time Lock Schedule */}
           <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
-            <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-2">
-              <Clock className="w-4 h-4 text-indigo-400" />
-              3. Time-Lock Schedule
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-200 uppercase tracking-wider flex items-center gap-2">
+                <Clock className="w-4 h-4 text-indigo-400" />
+                3. Time-Lock Schedule
+              </h3>
+              <div className="flex items-center gap-1.5 text-xs">
+                <span className="text-slate-500 text-[11px] hidden sm:inline">Presets:</span>
+                <button
+                  type="button"
+                  onClick={() => setUnlockMinutesFromNow(10)}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 text-[11px] transition"
+                >
+                  +10m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUnlockMinutesFromNow(30)}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 text-[11px] transition"
+                >
+                  +30m
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUnlockMinutesFromNow(60)}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 text-[11px] transition"
+                >
+                  +1h
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUnlockMinutesFromNow(1440)}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 text-[11px] transition"
+                >
+                  +24h
+                </button>
+              </div>
+            </div>
 
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">
@@ -580,6 +623,7 @@ export default function ExaminerPage() {
               </p>
             </div>
           </div>
+
 
           {/* Section 4: Authorized Exam Centers */}
           <div className="glass-panel p-6 rounded-2xl border border-slate-800 space-y-4">
