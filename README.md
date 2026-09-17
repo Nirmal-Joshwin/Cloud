@@ -1,15 +1,5 @@
 # ExamVault: Decentralized Time-Locked Exam Paper Security System
 
-[![Solidity](https://img.shields.io/badge/Solidity-0.8.24-363636?logo=solidity)](https://soliditylang.org/)
-[![Next.js](https://img.shields.io/badge/Next.js-14_App_Router-black?logo=next.js)](https://nextjs.org/)
-[![TailwindCSS](https://img.shields.io/badge/Tailwind_CSS-3.4-38bdf8?logo=tailwind-css)](https://tailwindcss.com/)
-[![Ethers.js](https://img.shields.io/badge/Ethers.js-v6-2535a0)](https://docs.ethers.org/v6/)
-[![IPFS / Pinata](https://img.shields.io/badge/IPFS-Pinata_Cloud-65c5c6?logo=ipfs)](https://pinata.cloud/)
-[![Hardhat](https://img.shields.io/badge/Hardhat-2.22-fff100?logo=ethereum)](https://hardhat.org/)
-[![Network](https://img.shields.io/badge/Network-Sepolia_Testnet-blue)](https://sepolia.etherscan.io/)
-
----
-
 ## 📖 1. Project Description
 
 **ExamVault** is a zero-trust, decentralized exam paper distribution system engineered to prevent question paper leaks before the official examination start time.
@@ -273,8 +263,3 @@ npx hardhat test
 7. **Successful Key Release**: Asserts that advancing blockchain time past `unlockTime` releases the correct AES key to whitelisted centers.
 8. **Examiner Access**: Asserts that the examiner can also retrieve the decryption key once unlocked.
 
----
-
-## 📄 License
-
-This project is licensed under the **MIT License**.
