@@ -11,9 +11,11 @@ import {
   getContractAddress,
   setCustomContractAddress,
   deployExamVaultFromBrowser,
+  switchToSepoliaNetwork,
   hasInjectedWallet,
   HARDHAT_TEST_ACCOUNTS,
 } from "@/lib/contract";
+
 import {
   FileUp,
   Key,
@@ -177,6 +179,15 @@ export default function ExaminerPage() {
       setErrorMsg(null);
       setDeployedNotice(null);
 
+      // Auto-switch to Sepolia testnet to avoid expensive mainnet gas fees
+      if (hasInjectedWallet()) {
+        try {
+          await switchToSepoliaNetwork();
+        } catch (switchErr) {
+          console.warn("Could not auto-switch network:", switchErr);
+        }
+      }
+
       const wallet = await connectWallet();
       const deployedAddr = await deployExamVaultFromBrowser(wallet.signer);
 
@@ -191,6 +202,7 @@ export default function ExaminerPage() {
       setIsDeployingContract(false);
     }
   };
+
 
   const handleSaveCustomContract = () => {
     if (!ethers.isAddress(customContractInput.trim())) {
