@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: examvault
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm install && npm run compile && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20.17.0
+      - key: PINATA_JWT
+        sync: false
+      - key: PINATA_API_KEY
+        sync: false
+      - key: PINATA_SECRET_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_CONTRACT_ADDRESS
+        sync: false
+      - key: NEXT_PUBLIC_GATEWAY_URL
+        value: https://gateway.pinata.cloud/ipfs/
+      - key: NEXT_PUBLIC_RPC_URL
+        sync: false
+

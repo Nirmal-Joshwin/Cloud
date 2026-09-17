@@ -1,0 +1,232 @@
+import { ethers } from "ethers";
+
+export const EXAM_VAULT_ABI = [
+  "function createExam(uint256 _examId, string memory _ipfsCID, uint256 _unlockTime, string memory _encryptedKey, address[] memory _authorizedCenters) external",
+  "function getDecryptionKey(uint256 _examId) external view returns (string memory)",
+  "function getExamMetadata(uint256 _examId, address _center) external view returns (string memory ipfsCID, uint256 unlockTime, address examiner, bool isCallerAuthorized, bool isUnlocked, uint256 currentBlockTimestamp)",
+  "function isCenterWhitelisted(uint256 _examId, address _center) external view returns (bool)",
+  "function exams(uint256) external view returns (string ipfsCID, uint256 unlockTime, string encryptedKey, address examiner, bool exists)",
+  "function isAuthorizedCenter(uint256, address) external view returns (bool)",
+  "event ExamCreated(uint256 indexed examId, string ipfsCID, uint256 unlockTime, address indexed examiner, uint256 authorizedCenterCount)",
+  "event KeyUnlocked(uint256 indexed examId, address indexed caller, uint256 timestamp)"
+];
+
+// Pre-configured Hardhat test accounts for instant local testing without MetaMask
+export const HARDHAT_TEST_ACCOUNTS = [
+  {
+    name: "Account #0 (Examiner)",
+    address: "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+    privateKey: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+    role: "Examiner",
+  },
+  {
+    name: "Account #1 (Authorized Center 1)",
+    address: "0x70997970C51812dc3A010C7d01b50e0d17dc79C8",
+    privateKey: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
+    role: "Authorized Exam Center",
+  },
+  {
+    name: "Account #2 (Authorized Center 2)",
+    address: "0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC",
+    privateKey: "0x5de4111afa1a4b93908f40abac5ba74728f5784e7a4957642dd042077f320ac0",
+    role: "Authorized Exam Center",
+  },
+  {
+    name: "Account #3 (Unauthorized Account)",
+    address: "0x90F79bf6EB2c4f870365E785982E1f101E93b906",
+    privateKey: "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
+    role: "Unauthorized / External",
+  },
+];
+
+// Helper to get configured contract address
+export function getContractAddress(): string {
+  if (process.env.NEXT_PUBLIC_CONTRACT_ADDRESS) {
+    return process.env.NEXT_PUBLIC_CONTRACT_ADDRESS;
+  }
+  
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const addressJson = require("../contracts/contract-address.json");
+    if (addressJson && addressJson.ExamVault) {
+      return addressJson.ExamVault;
+    }
+  } catch {
+    // contract-address.json not yet created
+  }
+
+  return "0x5FbDB2315678afecb367f032d93F642f64180aa3";
+}
+
+/**
+ * Check if browser has an injected Web3 wallet (MetaMask)
+ */
+export function hasInjectedWallet(): boolean {
+  return typeof window !== "undefined" && Boolean((window as unknown as { ethereum?: unknown }).ethereum);
+}
+
+/**
+ * Connect to wallet. Supports both MetaMask and built-in Hardhat simulated demo accounts.
+ */
+export async function connectWallet(forcedTestAccountIndex?: number): Promise<{
+  address: string;
+  signer: ethers.Signer;
+  provider: ethers.Provider;
+  chainId: bigint;
+  isDemoWallet: boolean;
+}> {
+  // Check if user specifically selected demo mode or if no MetaMask exists
+  const hasMetaMask = hasInjectedWallet();
+  const savedDemoAccount = typeof window !== "undefined" ? localStorage.getItem("examvault_demo_account") : null;
+
+  if (forcedTestAccountIndex !== undefined || (!hasMetaMask && savedDemoAccount !== null) || (!hasMetaMask)) {
+    const idx = forcedTestAccountIndex ?? (savedDemoAccount ? parseInt(savedDemoAccount, 10) : 0);
+    const testAccount = HARDHAT_TEST_ACCOUNTS[idx] || HARDHAT_TEST_ACCOUNTS[0];
+
+    try {
+      const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:8545";
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const signer = new ethers.Wallet(testAccount.privateKey, provider);
+
+      if (typeof window !== "undefined") {
+        localStorage.setItem("examvault_demo_account", idx.toString());
+      }
+
+      return {
+        address: testAccount.address,
+        signer,
+        provider,
+        chainId: 31337n,
+        isDemoWallet: true,
+      };
+    } catch {
+      throw new Error("Could not connect to local Hardhat node at http://127.0.0.1:8545. Please ensure 'npx hardhat node' is running.");
+    }
+  }
+
+  // Connect via MetaMask
+  const ethereum = (window as unknown as { ethereum: ethers.Eip1193Provider }).ethereum;
+  const provider = new ethers.BrowserProvider(ethereum);
+  const accounts = await provider.send("eth_requestAccounts", []);
+  
+  if (!accounts || accounts.length === 0) {
+    throw new Error("No accounts found in wallet.");
+  }
+
+  const signer = await provider.getSigner();
+  const network = await provider.getNetwork();
+
+  return {
+    address: accounts[0],
+    signer,
+    provider,
+    chainId: network.chainId,
+    isDemoWallet: false,
+  };
+}
+
+/**
+ * Get read-only or signer-connected contract instance
+ */
+export function getExamVaultContract(
+  signerOrProvider: ethers.Signer | ethers.Provider,
+  customAddress?: string
+): ethers.Contract {
+  const address = customAddress || getContractAddress();
+  return new ethers.Contract(address, EXAM_VAULT_ABI, signerOrProvider);
+}
+
+/**
+ * Switch wallet network to Hardhat Localhost (Chain ID 31337)
+ */
+export async function switchToHardhatNetwork(): Promise<void> {
+  if (!hasInjectedWallet()) return;
+  const ethereum = (window as unknown as { ethereum: { request: (args: unknown) => Promise<unknown> } }).ethereum;
+
+  const hardhatChainId = "0x7a69"; // 31337 in hex
+
+  try {
+    await ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: hardhatChainId }],
+    });
+  } catch (switchError: unknown) {
+    if (typeof switchError === "object" && switchError !== null && "code" in switchError && (switchError as { code: number }).code === 4902) {
+      await ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: hardhatChainId,
+            chainName: "Hardhat Localhost",
+            nativeCurrency: { name: "ETH", symbol: "ETH", decimals: 18 },
+            rpcUrls: ["http://127.0.0.1:8545"],
+          },
+        ],
+      });
+    } else {
+      throw switchError;
+    }
+  }
+}
+
+/**
+ * Switch wallet network to Ethereum Sepolia Testnet (Chain ID 11155111)
+ */
+export async function switchToSepoliaNetwork(): Promise<void> {
+  if (!hasInjectedWallet()) return;
+  const ethereum = (window as unknown as { ethereum: { request: (args: unknown) => Promise<unknown> } }).ethereum;
+
+  const sepoliaChainId = "0xaa36a7"; // 11155111 in hex
+
+  try {
+    await ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: sepoliaChainId }],
+    });
+  } catch (switchError: unknown) {
+    if (typeof switchError === "object" && switchError !== null && "code" in switchError && (switchError as { code: number }).code === 4902) {
+      await ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: sepoliaChainId,
+            chainName: "Sepolia Testnet",
+            nativeCurrency: { name: "SepoliaETH", symbol: "ETH", decimals: 18 },
+            rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"],
+            blockExplorerUrls: ["https://sepolia.etherscan.io"],
+          },
+        ],
+      });
+    } else {
+      throw switchError;
+    }
+  }
+}
+
+
+/**
+ * Helper to advance EVM time on local Hardhat node
+ */
+export async function advanceLocalEvmTime(seconds: number): Promise<void> {
+  if (hasInjectedWallet()) {
+    try {
+      const ethereum = (window as unknown as { ethereum: { request: (args: unknown) => Promise<unknown> } }).ethereum;
+      await ethereum.request({
+        method: "evm_increaseTime",
+        params: [seconds],
+      });
+      await ethereum.request({
+        method: "evm_mine",
+        params: [],
+      });
+      return;
+    } catch {
+      // Fallback to JSON-RPC direct
+    }
+  }
+
+  // Direct RPC call to local Hardhat node
+  const provider = new ethers.JsonRpcProvider("http://127.0.0.1:8545");
+  await provider.send("evm_increaseTime", [seconds]);
+  await provider.send("evm_mine", []);
+}
